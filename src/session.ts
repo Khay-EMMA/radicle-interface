@@ -4,7 +4,9 @@ import type { TransactionReceipt, TransactionResponse } from '@ethersproject/pro
 import { Config, getConfig } from "@app/config";
 import { Unreachable, assert, assertEq } from "@app/error";
 import WalletConnect from "@walletconnect/client";
+import WalletConnectProvider from "@walletconnect/web3-provider";
 import QRCodeModal from "@walletconnect/qrcode-modal";
+import WCEthereumProvider from "@app/WalletConnectEthereumProvider";
 import * as ethers from "ethers";
 // import ModalWalletQRCode from "@app/Components/Modal/QRCode.svelte";
 // import * as modal from "@app/modal";
@@ -38,7 +40,7 @@ export interface Store extends Readable<State> {
   connectMetamask(config: Config): Promise<void>;
   updateBalance(n: BigNumber): void;
   refreshBalance(config: Config): Promise<void>;
-  provider: ethers.providers.Provider;
+  web3Provider: ethers.providers.Provider;
   signer: ethers.Signer;
   disconnect(): Promise<void>;
   connectWalletConnect(config: Config): Promise<void>;
@@ -68,72 +70,79 @@ export const loadState = (initial: State): Store => {
   //     modal.hide();
   //   },
   // };
-  const newWalletConnect = (): WalletConnect => {
-    return new WalletConnect({
-      bridge: "https://bridge.walletconnect.org",
-      qrcodeModal: QRCodeModal,
-    });
-  };
-  let walletConnect = newWalletConnect();
 
   const disconnect = async () => {
-    await walletConnect.killSession().catch(() => {
-      // When the user disconnects wallet-side, calling `killSession`
-      // app-side trows an error because the wallet has already closed
-      // its socket. Therefore, we simply ignore it.
-    });
+    await provider.disconnect();
 
     store.set({ connection: Connection.Disconnected });
     window.localStorage.removeItem("session");
     location.reload();
-    reinitWalletConnect();
   };
 
-  //ethereum provider
-  const provider = new ethers.providers.Web3Provider(window.ethereum);
 
-  // instantiate wallet connect signer
-  const signer = new WalletConnectSigner(walletConnect, provider, disconnect);
+  // Create a connector
+  //  Create WalletConnect Provider
+  const provider = new WalletConnectProvider({
+    infuraId: "27e484dcd9e3efcfd25a83a78777cdf1",
+  });
+  //ethereum provider
+  const web3Provider = new ethers.providers.Web3Provider(provider);
+
+  const signer = web3Provider.getSigner();
+
   // Connect to a wallet using walletconnect
   const connectWalletConnect = async (config: Config) => {
   //Todo : check wallet state in the store before attempting to connect
     const state = get(store);
     const session = window.localStorage.getItem("session");
-    console.log(walletConnect.connected, session);
-    //if (session && walletConnect.connected) store.set({ connection: Connection.Connected, session: JSON.parse(session) });
+
+    if (session && provider.connected) store.set({ connection: Connection.Connected, session: JSON.parse(session) });
+
+
 
     assertEq(state.connection, Connection.Disconnected);
     store.set({ connection: Connection.Connecting });
 
     try {
-      await walletConnect.createSession();
-      console.log("got here");
-
-      walletConnect.on("connect", async (error, payload) => {
-        console.info(payload);
+      // Check if connection is already established
+      if (!provider.connected) {
+        // create new session
+        provider.connector.createSession();
+      }
+      await provider.enable();
+      provider.connector.on("connect", async (error, payload) => {
         if (error) {
           throw error;
         }
-        const address = await signer.getAddress();
 
+        // Get provided accounts and chainId
+        const { accounts, chainId } = payload.params[0];
+        const address = accounts[0];
         const tokenBalance: BigNumber = await config.token.balanceOf(address);
 
-        const session = { address, tokenBalance, tx: null };
+        const session = {address, tokenBalance, tx: null };
         const provNetwork = await ethers.providers.getNetwork(
-          signer.walletConnect.chainId
+          chainId
         );
         const network = {
           name: provNetwork.name,
           chainId: provNetwork.chainId,
         };
-        config = new Config(network, provider, signer);
+        config = new Config(network, web3Provider, signer);
 
         console.log(config, "config value");
+
+        console.log(address);
+
+
 
         store.set({ connection: Connection.Connected, session });
 
         saveSession({ ...session, tokenBalance: null });
       });
+
+
+
     } catch (e) {
       assertEq(state.connection, Connection.Disconnected);
       store.set({ connection: Connection.Disconnected });
@@ -142,15 +151,8 @@ export const loadState = (initial: State): Store => {
     store.set({ connection: Connection.Connecting });
   };
 
-  const reinitWalletConnect = () => {
-    walletConnect = newWalletConnect();
-    signer.walletConnect = walletConnect;
-  };
-  const onModalHide = (): void => {
-    if (state.connection === Connection.Disconnected) {
-      reinitWalletConnect();
-    }
-  };
+
+
 
   return {
     subscribe: store.subscribe,
@@ -287,7 +289,7 @@ export const loadState = (initial: State): Store => {
     },
     disconnect,
     connectWalletConnect,
-    provider,
+    web3Provider,
     signer,
   };
 };

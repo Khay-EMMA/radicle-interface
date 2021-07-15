@@ -5,7 +5,7 @@ import CeramicClient from "@ceramicnetwork/http-client";
 import { IDX } from "@ceramicstudio/idx";
 import WalletConnect from "@walletconnect/client";
 import config from "@app/config.json";
-import { WalletConnectSigner } from "./WalletConnectSigner";
+import type { WalletConnectSigner } from "./WalletConnectSigner";
 
 declare global {
   interface Window {
@@ -22,7 +22,7 @@ export class Config {
   orgs: { subgraph: string; contractHash: string };
   gasLimits: { createOrg: number };
   provider: ethers.providers.JsonRpcProvider;
-  signer: ethers.Signer & TypedDataSigner | WalletConnectSigner | null;
+  signer: ethers.Signer & TypedDataSigner | null;
   safe: {
     api?: string;
     client?: SafeServiceClient;
@@ -35,11 +35,16 @@ export class Config {
   ceramic: { client: CeramicClient };
   tokens: string[];
   token: ethers.Contract;
+  walletConnect: {
+    testChainId: number;
+    sessionRpcHost: string;
+    bridge: string;
+  };
 
   constructor(
     network: { name: string; chainId: number },
     provider: ethers.providers.JsonRpcProvider,
-    signer: ethers.Signer & TypedDataSigner | WalletConnectSigner | null,
+    signer: ethers.Signer & TypedDataSigner | null,
   ) {
     const cfg = (<Record<string, any>> config)[network.name];
     const api = config.radicle.api;
@@ -52,6 +57,7 @@ export class Config {
     this.network = network;
     this.seed = { api };
     this.registrar = cfg.registrar;
+    this.walletConnect = cfg.walletConnect;
     this.radToken = cfg.radToken;
     this.orgFactory = cfg.orgFactory;
     this.orgs = cfg.orgs;
@@ -89,12 +95,13 @@ function isMetamaskInstalled(): boolean {
 function isWalletConnectConnected(): boolean {
   const newWalletConnect = (): WalletConnect => {
     return new WalletConnect({
-      bridge: "https://bridge.walletconnect.org",
+      bridge: "https://radicle.bridge.walletconnect.org",
     });
   };
   walletConnect = newWalletConnect();
 
   if (walletConnect.connected){
+    console.log(true);
     return true;
   } else {
     return false;
@@ -116,16 +123,17 @@ export async function getConfig(): Promise<Config> {
   if (isWalletConnectConnected()){
     //ethereum provider
     const provider = new ethers.providers.Web3Provider(window.ethereum);
-    // instantiate wallet connect signer
-    const signer = new WalletConnectSigner(walletConnect, provider, disconnect);
+    // inititalize wallet connect signer
+    const signer =provider.getSigner();
 
     const provNetwork = await ethers.providers.getNetwork(
-      signer.walletConnect.chainId
+      walletConnect.chainId
     );
     const network = {
       name: provNetwork.name,
       chainId: provNetwork.chainId,
     };
+    //Check for network and throw error if network is not mainnet
     config = new Config(network, provider, signer);
   } else if (isMetamaskInstalled()) {
     // If we have Metamask, use it as the signer, but try to use Alchemy

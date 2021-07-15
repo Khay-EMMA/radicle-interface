@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import { writable } from 'svelte/store';
 import type { BigNumber } from 'ethers';
 import type { EnsResolver } from '@ethersproject/providers';
-import type { TypedDataSigner } from '@ethersproject/abstract-signer';
+import type { TypedDataSigner, Signer } from '@ethersproject/abstract-signer';
 import * as session from '@app/session';
 import { Failure } from '@app/error';
 import type { Config } from '@app/config';
