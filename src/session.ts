@@ -3,19 +3,13 @@ import type { BigNumber } from 'ethers';
 import type { TransactionReceipt, TransactionResponse } from '@ethersproject/providers';
 import { Config, getConfig } from "@app/config";
 import { Unreachable, assert, assertEq } from "@app/error";
-import WalletConnect from "@walletconnect/client";
+import { formatNetwork } from "@app/utils";
 import * as ethers from "ethers";
-import { WalletConnectSigner } from "@app/WalletConnectSigner";
 
 export enum Connection {
   Disconnected,
   Connecting,
   Connected
-}
-
-export enum ConnectionModalStateType {
-  Open,
-  Close
 }
 
 export type TxState =
@@ -30,141 +24,98 @@ export type State =
   | { connection: Connection.Connecting }
   | { connection: Connection.Connected; session: Session };
 
-export type ConnectionModalState =
-| { status: ConnectionModalStateType.Open; modalProps: ConnectionModalProps }
-| { status: ConnectionModalStateType.Close; modalProps: null };
 export interface Session {
   address: string;
   tokenBalance: BigNumber | null; // `null` means it isn't loaded yet.
   tx: TxState;
 }
-export interface ConnectionModalProps {
-  config: Config;
-  uri: string;
-}
+
 export interface Store extends Readable<State> {
   connectMetamask(config: Config): Promise<void>;
+  connectWalletConnect(config: Config): Promise<void>;
   updateBalance(n: BigNumber): void;
   refreshBalance(config: Config): Promise<void>;
-  provider: ethers.providers.Provider;
-  signer: ethers.Signer;
-  connectWalletConnect(config: Config): Promise<void>;
   setTxSigning(): void;
   setTxPending(tx: TransactionResponse): void;
   setTxConfirmed(tx: TransactionReceipt): void;
   setChangedAccount(address: string): void;
 }
 
-const modalStore = writable<ConnectionModalState>({ status: ConnectionModalStateType.Close, modalProps: null });
-export const store = derived(modalStore, ($store) => $store);
-
 export const loadState = (initial: State): Store => {
   const store = writable<State>(initial);
-  const session = window.localStorage.getItem("session");
-  function newWalletConnect(config: Config): WalletConnect {
+  const metamask = window.localStorage.getItem("metamask");
 
-    Config.walletConnect = new WalletConnect({
-      bridge: config.radicleBridge.bridge,
-      qrcodeModal: {
-        open: (uri: string, onClose, _opts?: unknown) => {
-          modalStore.set({ status: ConnectionModalStateType.Open, modalProps: { uri, config } });
-          console.log(_opts);
-          onClose();
-        },
-        close: () => {
-          modalStore.set({ status: ConnectionModalStateType.Close, modalProps: null });
-        },
-      },
-    });
-
-    return Config.walletConnect;
+  if (metamask) {
+    store.set({ connection: Connection.Connected, session: JSON.parse(metamask) });
   }
-  if (session) store.set({ connection: Connection.Connected, session: JSON.parse(session) });
-
-  let network: any;
-  let provider: any;
-  let signer: any;
-
-  // Connect to a wallet using walletconnect
-  const connectWalletConnect = async (config: Config) => {
-    let walletConnect: WalletConnect = Config.walletConnect;
-    walletConnect = newWalletConnect(config);
-    provider = new ethers.providers.Web3Provider(window.ethereum);
-    signer = new WalletConnectSigner(walletConnect, provider);
-
-    config.setSigner(signer);
-    const state = get(store);
-    const session = window.localStorage.getItem("session");
-
-    if (session && walletConnect?.connected) {
-      store.set({ connection: Connection.Connected, session: JSON.parse(session) });
-      return;
-    }
-    assertEq(state.connection, Connection.Disconnected);
-    store.set({ connection: Connection.Connecting });
-
-    try {
-      await walletConnect.connect();
-      const address = await signer.getAddress();
-      const tokenBalance: BigNumber = await config.token.balanceOf(address);
-      const session = { address, tokenBalance, tx: null };
-      const provNetwork = await ethers.providers.getNetwork(
-        signer.walletConnect.chainId
-      );
-      network = {
-        name: provNetwork.name,
-        chainId: provNetwork.chainId,
-      };
-      if (network.chainId !== config.network.chainId) {
-        walletConnect.killSession();
-        throw `Network mismatch`;
-      }
-      config = new Config(network, provider, signer);
-
-      store.set({ connection: Connection.Connected, session });
-      saveSession({ ...session, tokenBalance: null });
-
-    } catch (e) {
-      console.log(e);
-      store.set({ connection: Connection.Disconnected });
-      throw e;
-    }
-  };
-
 
   return {
     subscribe: store.subscribe,
     connectMetamask: async (config: Config) => {
-      assert(config.signer);
+      assert(config.metamaskSigner);
+
       const state = get(store);
 
       assertEq(state.connection, Connection.Disconnected || Connection.Connecting);
       store.set({ connection: Connection.Connecting });
 
-      // TODO: This hangs on Brave, if you have to unlock your wallet..
-      try {
-        await window.ethereum.request({ method: 'eth_requestAccounts' });
-      } catch (e) {
-        console.error(e);
-      }
+      await window.ethereum.request({ method: 'eth_requestAccounts' });
 
-      const signer = config.signer;
+      const signer = config.metamaskSigner;
       const address = await signer.getAddress();
 
-      network = config.network;
-      config = new Config(network, provider, signer);
+      config.setSigner(signer);
 
       try {
-        modalStore.set({ status: ConnectionModalStateType.Close, modalProps: null });
+        config.walletConnect.state.set({ state: "close" });
+
         const tokenBalance: BigNumber = await config.token.balanceOf(address);
         const session = { address, tokenBalance, tx: null };
+
         store.set({
           connection: Connection.Connected,
           session,
         });
-        saveSession({ ...session, tokenBalance: null });
+        saveSession({ ...session });
       } catch (e) {
         console.error(e);
+      }
+    },
+
+    connectWalletConnect: async (config: Config) => {
+      store.set({ connection: Connection.Connecting });
+      const signer = config.getWalletConnectSigner();
+
+      try {
+        await config.walletConnect.client.connect();
+        console.log("WalletConnect: connected.");
+
+        const address = await signer.getAddress();
+        const tokenBalance: BigNumber = await config.token.balanceOf(address);
+        const session = { address, tokenBalance, tx: null };
+        const network = await ethers.providers.getNetwork(
+          signer.walletConnect.chainId
+        );
+
+        if (network.chainId !== config.network.chainId) {
+          config.walletConnect.client.killSession();
+          throw new Error(
+            `Network mismatch. Please switch your wallet to ${formatNetwork(config.network)}.`
+          );
+        }
+        store.set({ connection: Connection.Connected, session });
+      } catch (e) {
+        console.log("WalletConnect: connection failed.");
+        store.set({ connection: Connection.Disconnected });
+
+        // There seems to be no way to detect this "error" caused by the user
+        // closing the modal dialog, besides matching on the message string.
+        // Welcome to the wonderful ghetto that is WalletConnect.
+        //
+        // Since it's not really an error, we don't throw if this is what happened.
+        if (e.message !== "User close QRCode Modal") {
+          throw e;
+        }
       }
     },
 
@@ -259,7 +210,7 @@ export const loadState = (initial: State): Store => {
             // In case of locking Metamask the accountsChanged event returns undefined.
             // To prevent out of sync state, the wallet gets disconnected.
             if (address === undefined) {
-              disconnectWallet();
+              disconnectMetamask();
             } else {
               s.session.address = address;
               saveSession(s.session);
@@ -270,9 +221,6 @@ export const loadState = (initial: State): Store => {
         }
       });
     },
-    connectWalletConnect,
-    provider,
-    signer,
   };
 };
 
@@ -288,7 +236,7 @@ export const session = derived(state, s => {
 window.ethereum?.on('chainChanged', () => {
   // We disconnect the wallet to avoid out of sync state
   // between the account address and IDX DIDs
-  disconnectWallet();
+  disconnectMetamask();
   location.reload();
 });
 
@@ -317,14 +265,20 @@ export async function approveSpender(spender: string, amount: BigNumber, config:
   }
 }
 
-export function disconnectWallet(): void {
-  window.localStorage.removeItem('session');
-  Config.walletConnect?.killSession();
+export function disconnectMetamask(): void {
+  window.localStorage.removeItem('metamask');
   window.location.reload();
 }
 
+export function disconnectWallet(config: Config): void {
+  if (config.walletConnect.client.connected) {
+    config.walletConnect.client.killSession();
+  }
+  disconnectMetamask();
+}
+
 function saveSession(session: Session): void {
-  window.localStorage.setItem("session", JSON.stringify({
+  window.localStorage.setItem("metamask", JSON.stringify({
     ...session, tokenBalance: null
   }));
 }

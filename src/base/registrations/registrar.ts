@@ -1,4 +1,3 @@
-// TODO: Show "look at your wallet" / "confirm tx" before state change.
 import { ethers } from 'ethers';
 import { writable } from 'svelte/store';
 import type { BigNumber } from 'ethers';
@@ -45,7 +44,6 @@ export type Connection =
   | { connection: State.SigningRegister }
   | { connection: State.Registering }
   | { connection: State.Registered };
-
 
 export const state = writable<Connection>({ connection: State.Connecting });
 
@@ -146,7 +144,8 @@ async function commitAndRegister(name: string, owner: string, config: Config): P
 }
 
 async function commit(commitment: string, fee: BigNumber, minAge: number, config: Config): Promise<void> {
-  assert(config.signer, "Signer is not available");
+  assert(config.signer, "signer is not available");
+
   const owner = config.signer;
   const ownerAddr = await owner.getAddress();
   const spender = config.registrar.address;
@@ -221,7 +220,7 @@ async function permitSignature(
 
 async function register(name: string, owner: string, salt: Uint8Array, config: Config) {
   assert(config.signer, "signer is not available");
-  state.set({ connection: State.Registering });
+  state.set({ connection: State.SigningRegister });
 
   const tx = await registrar(config).connect(config.signer).register(
     name, owner, ethers.BigNumber.from(salt), { gasLimit: 150000 }
@@ -231,7 +230,7 @@ async function register(name: string, owner: string, salt: Uint8Array, config: C
   console.log("Sent", tx);
 
   await tx.wait();
-  window.localStorage.clear();
+  window.localStorage.removeItem("commitment");
   state.set({ connection: State.Registered });
 }
 

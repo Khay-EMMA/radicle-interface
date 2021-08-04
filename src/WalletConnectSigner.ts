@@ -1,23 +1,15 @@
 import type WalletConnect from "@walletconnect/client";
 import * as ethers from "ethers";
 import * as ethersBytes from "@ethersproject/bytes";
-import type {
-  Provider,
-  TransactionRequest,
-  TransactionResponse,
-} from "@ethersproject/abstract-provider";
-
-import {
-  Deferrable,
-  resolveProperties,
-} from "@ethersproject/properties";
+import type { TransactionRequest, TransactionResponse } from "@ethersproject/abstract-provider";
+import { Deferrable, resolveProperties } from "@ethersproject/properties";
 import { _TypedDataEncoder } from "ethers/lib/utils";
 import type { TypedDataDomain, TypedDataField } from "@ethersproject/abstract-signer";
 
 export class WalletConnectSigner extends ethers.Signer {
   public walletConnect: WalletConnect;
-
   public readonly provider: ethers.providers.JsonRpcProvider;
+
   constructor(
     walletConnect: WalletConnect,
     provider: ethers.providers.JsonRpcProvider,
@@ -87,7 +79,9 @@ export class WalletConnectSigner extends ethers.Signer {
       chainId: tx.chainId,
       confirmations: 0,
       from: from,
-      wait: (confirmations?: number) => { return this.provider?.waitForTransaction(txHash, confirmations); }
+      wait: (confirmations?: number) => {
+        return this.provider?.waitForTransaction(txHash, confirmations);
+      }
     };
   }
 
@@ -110,7 +104,7 @@ export class WalletConnectSigner extends ethers.Signer {
     return signedTx;
   }
 
-  connect(_provider: Provider): ethers.Signer {
+  connect(): ethers.Signer {
     throw new Error("WalletConnectSigner.connect should never be called");
   }
 }

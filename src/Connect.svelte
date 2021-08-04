@@ -1,38 +1,50 @@
 <script lang="ts">
-  import { Connection, state, store, ConnectionModalStateType } from "@app/session";
+  import { get } from "svelte/store";
+  import { Connection, state } from "@app/session";
+  import type { Err } from '@app/error';
+  import Error from '@app/Error.svelte';
   import type { Config } from '@app/config';
-  import ModalWalletQRCode from "@app/components/Modal/QRCode.svelte";
-
-  export let config: Config;
+  import ConnectWallet from "@app/components/Modal/ConnectWallet.svelte";
   export let caption = "Connect";
   export let className = "";
   export let style = "";
-
-  let walletUnavailable = !window.ethereum;
-
-  const onClickConnect = () => {
-    state.connectWalletConnect(config);
+  export let config: Config;
+  let error: Err | null = null;
+  const onModalClose = () => {
+    const wcs = get(config.walletConnect.state);
+    if (wcs.state === "open") {
+      config.walletConnect.state.set({ state: "close" });
+      wcs.onClose();
+    }
   };
-  $: modalConnected = $store.status === ConnectionModalStateType.Open;
+  const onConnect = async () => {
+    try {
+      await state.connectWalletConnect(config);
+    } catch (e) {
+      walletConnectState.set({ state: "close" });
+      error = e;
+    }
+  };
   $: connecting = $state.connection === Connection.Connecting;
+  $: walletConnectState = config.walletConnect.state;
 </script>
 
-<style>
-</style>
-
 <button
-  on:click={onClickConnect}
+  on:click|stopPropagation={onConnect}
   {style}
   class="connect {className}"
-  disabled={connecting || walletUnavailable}
+  disabled={connecting}
   data-waiting={connecting || null}
 >
-  {#if modalConnected && $store.modalProps?.uri}
-    <ModalWalletQRCode {config} uri={$store.modalProps.uri} />
-  {/if}
   {#if connecting}
     Connecting...
   {:else}
     {caption}
   {/if}
 </button>
+
+{#if $walletConnectState.state === "open"}
+  <ConnectWallet {config} uri={$walletConnectState.uri} on:close={onModalClose} />
+{:else if error}
+  <Error floating emoji="👛" title="Connection failed" {error} on:close={() => error = null} />
+{/if}
