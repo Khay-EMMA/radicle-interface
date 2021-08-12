@@ -277,6 +277,12 @@ export function disconnectWallet(config: Config): void {
   disconnectMetamask();
 }
 
+export async function changeMetamaskNetwork(chainId: string): Promise<void> {
+  await window.ethereum.request({ method: 'wallet_switchEthereumChain',
+    params: [{ chainId: chainId }]
+  });
+}
+
 function saveSession(session: Session): void {
   window.localStorage.setItem("metamask", JSON.stringify({
     ...session, tokenBalance: null

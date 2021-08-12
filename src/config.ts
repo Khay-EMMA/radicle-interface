@@ -8,6 +8,7 @@ import { IDX } from "@ceramicstudio/idx";
 import WalletConnect from "@walletconnect/client";
 import config from "@app/config.json";
 import { WalletConnectSigner } from "./WalletConnectSigner";
+import { changeMetamaskNetwork, disconnectWallet } from "./session";
 
 declare global {
   interface Window {
@@ -157,11 +158,17 @@ export class Config {
     walletConnect.on("modal_closed", () => {
       state.set({ state: "close" });
     });
-    walletConnect.on("disconnect", () => {
+    walletConnect.on("disconnect", async () => {
       const wcs = get(state);
       if (wcs.state === "open") {
         wcs.onClose();
       }
+      const config = await getConfig();
+      disconnectWallet(config);
+    });
+    walletConnect.on("session_update", async (error, payload) => {
+      console.log(payload.network, error, "session update");
+      changeMetamaskNetwork(payload.network);
     });
 
     // Behold, we set this private class variable here because WalletConnect doesn't
