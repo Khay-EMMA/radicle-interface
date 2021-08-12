@@ -168,7 +168,7 @@ export class Config {
     });
     walletConnect.on("session_update", async (error, payload) => {
       console.log(payload.network, error, "session update");
-      changeMetamaskNetwork(payload.network);
+      await changeMetamaskNetwork(payload.network);
     });
 
     // Behold, we set this private class variable here because WalletConnect doesn't
